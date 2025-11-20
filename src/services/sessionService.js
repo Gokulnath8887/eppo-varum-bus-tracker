@@ -1,22 +1,74 @@
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+
+// Initialize Firebase Auth
+const auth = getAuth();
+
+// Keep track of authentication state
+let isAuthenticated = false;
+
+// Set up auth state observer
+onAuthStateChanged(auth, (user) => {
+  isAuthenticated = !!user;
+  console.log("Auth state changed:", isAuthenticated ? "Authenticated" : "Not authenticated");
+  if (user) {
+    console.log("User UID:", user.uid);
+  }
+});
+
+// Function to authenticate driver
+const authenticateDriver = async () => {
+  try {
+    // Sign in anonymously
+    const userCredential = await signInAnonymously(auth);
+    // Set custom claims for driver role (this would typically be done in a Cloud Function)
+    // For now, we'll use a custom token approach
+    return userCredential.user;
+  } catch (error) {
+    console.error("Authentication error:", error);
+    throw new Error("Failed to authenticate driver");
+  }
+};
+
+// Log Firebase configuration status
+console.log("Firebase DB initialized:", !!db);
 
 // Start a ride session (driver)
 export const startRideSession = async (driverCode, driverId = "driver1") => {
   try {
+    console.log("Starting ride session with code:", driverCode);
+    
+    // Check if Firebase is properly initialized
+    if (!db) {
+      throw new Error("Firebase not initialized. Check your environment variables.");
+    }
+    
+    // Authenticate the driver
+    console.log("Authenticating driver...");
+    await authenticateDriver();
+    
+    // Get current user
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error("Authentication failed. Please try again.");
+    }
+    
     // Code validation should be done before calling this function
     const rideId = `ride_${Date.now()}`;
     
+    console.log("Creating session document with ID:", rideId);
     // Create new session
     await setDoc(doc(db, "sessions", rideId), {
       active: true,
-      driverId: driverId,
+      driverId: user.uid, // Use the authenticated user's UID
       driverCode: driverCode.toUpperCase(), // Store for reference
       startedAt: serverTimestamp(),
       endedAt: null,
       latestLocation: null
     });
 
+    console.log("Updating current session pointer");
     // Update current session pointer
     await setDoc(doc(db, "app", "currentSession"), {
       active: true,
@@ -24,12 +76,18 @@ export const startRideSession = async (driverCode, driverId = "driver1") => {
       updatedAt: serverTimestamp()
     });
 
+    console.log("Session created successfully with rideId:", rideId);
     // TODO: Trigger Cloud Function to send FCM notifications to all students
     // For now, we'll handle this on the client side as a temporary measure
 
     return { success: true, rideId };
   } catch (error) {
     console.error("Error starting ride session:", error);
+    console.error("Error details:", {
+      code: error.code,
+      message: error.message,
+      stack: error.stack
+    });
     throw error;
   }
 };

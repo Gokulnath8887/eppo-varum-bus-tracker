@@ -16,10 +16,14 @@ const firebaseConfig = {
 if (!firebaseConfig.apiKey || firebaseConfig.apiKey === 'AIzaSy...') {
   console.error("⚠️ Firebase not configured! Add your credentials to .env.local");
   console.log("Current config:", firebaseConfig);
+} else {
+  console.log("Firebase configured successfully");
+  console.log("Project ID:", firebaseConfig.projectId);
 }
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+console.log("Firebase app initialized:", !!app);
 
 // Initialize Firestore
 export const db = getFirestore(app);
