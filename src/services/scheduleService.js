@@ -1,5 +1,6 @@
 import { startRideSession } from "./sessionService";
 import { isTodayHoliday } from "../config/holidays";
+import { db } from "../firebase";
 
 // Auto-session configuration
 const AUTO_SESSION_CONFIG = {
@@ -36,6 +37,12 @@ export const isWithinAutoSessionWindow = () => {
 
 // Start auto session if within time window and no active session
 export const checkAndStartAutoSession = async (currentSessionActive) => {
+  // Check if Firebase is initialized
+  if (!db) {
+    console.error("Firebase not initialized. Check your environment variables.");
+    return { autoStarted: false, reason: "Firebase not initialized" };
+  }
+
   if (!AUTO_SESSION_CONFIG.enabled) {
     return { autoStarted: false, reason: "Auto-session disabled" };
   }

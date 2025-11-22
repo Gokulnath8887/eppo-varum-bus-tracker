@@ -47,24 +47,34 @@ function App() {
 
   // Auto-session scheduler (7:45 AM - 9:00 AM)
   useEffect(() => {
-    const cleanup = startAutoSessionScheduler((result) => {
-      if (result.autoStarted) {
-        console.log("Auto-session started:", result.message);
-        setSessionActive(true);
-        localStorage.setItem("eppo_session", "true");
-        localStorage.setItem("eppo_rideId", result.rideId);
-        
-        // Show notification to user
-        if (Notification.permission === "granted") {
-          new Notification("Bus Session Started", {
-            body: "Auto-session started for 7:45 AM - 9:00 AM",
-            icon: "/logo192.png"
-          });
+    try {
+      const cleanup = startAutoSessionScheduler((result) => {
+        if (result.autoStarted) {
+          console.log("Auto-session started:", result.message);
+          setSessionActive(true);
+          localStorage.setItem("eppo_session", "true");
+          localStorage.setItem("eppo_rideId", result.rideId);
+          
+          // Show notification to user
+          if (Notification.permission === "granted") {
+            new Notification("Bus Session Started", {
+              body: "Auto-session started for 7:45 AM - 9:00 AM",
+              icon: "/logo192.png"
+            });
+          }
+        } else if (result.reason === "Firebase not initialized") {
+          console.error("Failed to start auto-session:", result.reason);
+          // Don't show error to user, continue with normal app flow
+        } else {
+          console.log("Auto-session not started:", result.reason);
         }
-      }
-    });
+      });
 
-    return cleanup;
+      return cleanup;
+    } catch (error) {
+      console.error("Error in auto-session scheduler:", error);
+      // Don't show error to user, continue with normal app flow
+    }
   }, []);
 
   // show nav after leaving intro
