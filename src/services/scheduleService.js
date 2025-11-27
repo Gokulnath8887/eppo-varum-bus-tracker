@@ -1,126 +1,116 @@
 import { startRideSession } from "./sessionService";
 import { isTodayHoliday } from "../config/holidays";
-import { db } from "../firebase";
 
 // Auto-session configuration
-const AUTO_SESSION_CONFIG = {
-  startTime: { hour: 7, minute: 45 }, // 7:45 AM
-  endTime: { hour: 9, minute: 0 },    // 9:00 AM
-  autoDriverCode: "AUTO_SESSION_7AM", // Code used for auto sessions
-  enabled: true
+export const AUTO_SESSION_CONFIG = {
+  enabled: false, // Auto-session is disabled by default without Firebase
+  startTime: "08:00", // 24-hour format
+  endTime: "18:00",  // 24-hour format
+  checkInterval: 5 * 60 * 1000, // 5 minutes
+  driverCode: "AUTO123" // Special code for auto-sessions
 };
 
-// Check if current time is within auto-session window
-export const isWithinAutoSessionWindow = () => {
+// Track if we've already started a session today
+let hasAutoSessionStarted = false;
+
+// Check if current time is within the auto-session window
+const isWithinAutoSessionWindow = () => {
+  if (!AUTO_SESSION_CONFIG.enabled) return false;
+  
   const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const [startHour, startMinute] = AUTO_SESSION_CONFIG.startTime.split(':').map(Number);
+  const [endHour, endMinute] = AUTO_SESSION_CONFIG.endTime.split(':').map(Number);
   
-  // Don't run on Sundays
-  if (dayOfWeek === 0) {
-    return false;
-  }
+  const startTime = new Date();
+  startTime.setHours(startHour, startMinute, 0, 0);
   
-  // Don't run on holidays
-  if (isTodayHoliday()) {
-    console.log("Auto-session skipped: Today is a holiday");
-    return false;
-  }
+  const endTime = new Date();
+  endTime.setHours(endHour, endMinute, 0, 0);
   
-  const startMinutes = AUTO_SESSION_CONFIG.startTime.hour * 60 + AUTO_SESSION_CONFIG.startTime.minute;
-  const endMinutes = AUTO_SESSION_CONFIG.endTime.hour * 60 + AUTO_SESSION_CONFIG.endTime.minute;
-  const currentMinutes = currentHour * 60 + currentMinute;
-  
-  return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  return now >= startTime && now <= endTime;
 };
 
 // Start auto session if within time window and no active session
 export const checkAndStartAutoSession = async (currentSessionActive) => {
-  // Check if Firebase is initialized
-  if (!db) {
-    console.error("Firebase not initialized. Check your environment variables.");
-    return { autoStarted: false, reason: "Firebase not initialized" };
-  }
-
   if (!AUTO_SESSION_CONFIG.enabled) {
-    return { autoStarted: false, reason: "Auto-session disabled" };
+    return { autoStarted: false, reason: "Auto-session is disabled" };
   }
 
   if (currentSessionActive) {
     return { autoStarted: false, reason: "Session already active" };
   }
 
-  if (!isWithinAutoSessionWindow()) {
-    return { autoStarted: false, reason: "Outside auto-session time window" };
-  }
-
-  // Check if auto session was already started today
-  const lastAutoSessionDate = localStorage.getItem("eppo_last_auto_session");
-  const today = new Date().toDateString();
-  
-  if (lastAutoSessionDate === today) {
+  if (hasAutoSessionStarted) {
     return { autoStarted: false, reason: "Auto-session already started today" };
   }
 
+  if (isTodayHoliday()) {
+    return { autoStarted: false, reason: "Today is a holiday" };
+  }
+
+  if (!isWithinAutoSessionWindow()) {
+    return { autoStarted: false, reason: "Outside of auto-session hours" };
+  }
+
   try {
-    console.log("Auto-starting session for 7:45 AM - 9:00 AM window");
-    const result = await startRideSession(AUTO_SESSION_CONFIG.autoDriverCode, "auto_driver");
-    
-    if (result.success) {
-      localStorage.setItem("eppo_last_auto_session", today);
-      return { 
-        autoStarted: true, 
-        rideId: result.rideId,
-        message: "Auto-session started (7:45 AM - 9:00 AM)" 
-      };
-    }
+    console.log("Starting auto-session...");
+    await startRideSession(AUTO_SESSION_CONFIG.driverCode, "auto-driver");
+    hasAutoSessionStarted = true;
+    return { autoStarted: true };
   } catch (error) {
-    console.error("Failed to auto-start session:", error);
+    console.error("Failed to start auto-session:", error);
     return { autoStarted: false, reason: error.message };
   }
-
-  return { autoStarted: false, reason: "Unknown error" };
 };
 
-// Get minutes until auto-session starts
-export const getMinutesUntilAutoSession = () => {
+// Reset auto-session flag at midnight
+const resetAutoSessionFlag = () => {
   const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  const startMinutes = AUTO_SESSION_CONFIG.startTime.hour * 60 + AUTO_SESSION_CONFIG.startTime.minute;
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
   
-  if (currentMinutes >= startMinutes) {
-    // Already past start time, check tomorrow
-    return (24 * 60 - currentMinutes) + startMinutes;
+  const timeUntilMidnight = midnight - now;
+  
+  setTimeout(() => {
+    hasAutoSessionStarted = false;
+    console.log("Auto-session flag reset for a new day");
+    resetAutoSessionFlag(); // Schedule next reset
+  }, timeUntilMidnight);
+};
+
+// Initialize the auto-session system
+export const initAutoSessionSystem = () => {
+  if (!AUTO_SESSION_CONFIG.enabled) {
+    console.log("Auto-session system is disabled");
+    return;
   }
   
-  return startMinutes - currentMinutes;
+  // Start the auto-reset cycle
+  resetAutoSessionFlag();
+  
+  console.log("Auto-session system initialized");
 };
 
 // Schedule auto-session check (runs every minute)
 export const startAutoSessionScheduler = (onSessionStart) => {
+  if (!AUTO_SESSION_CONFIG.enabled) {
+    return () => {}; // Return empty cleanup function
+  }
+
   const checkInterval = setInterval(async () => {
-    const currentSessionActive = localStorage.getItem("eppo_session") === "true";
-    const result = await checkAndStartAutoSession(currentSessionActive);
-    
+    const result = await checkAndStartAutoSession(false);
     if (result.autoStarted && onSessionStart) {
       onSessionStart(result);
     }
   }, 60000); // Check every 1 minute
 
-  // Initial check on startup
-  const performInitialCheck = async () => {
-    const currentSessionActive = localStorage.getItem("eppo_session") === "true";
-    const result = await checkAndStartAutoSession(currentSessionActive);
-    
+  // Initial check
+  checkAndStartAutoSession(false).then(result => {
     if (result.autoStarted && onSessionStart) {
       onSessionStart(result);
     }
-  };
-  
-  performInitialCheck();
+  });
 
+  // Return cleanup function
   return () => clearInterval(checkInterval);
 };
-
-export { AUTO_SESSION_CONFIG };
